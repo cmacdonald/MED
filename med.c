@@ -26,11 +26,43 @@
 #include <unistd.h>
 #include <errno.h>
 
+
+typedef enum { false, true } bool;
+
+typedef struct config_t
+{
+  int count;
+  bool ndcg;
+  bool rbp;
+  bool err;
+} config_t;
+
+typedef struct args_t 
+{
+  char *run1;
+  char *run2;
+  char *qrels;
+  config_t conf;
+} args_t;
+
+args_t new_args()
+  {
+    args_t new;
+    new.run1 = (char *) 0;
+    new.run2 = (char *) 0;
+    new.qrels = (char *) 0;
+    new.conf.count = 0;
+    new.conf.ndcg = false;
+    new.conf.rbp = false;
+    new.conf.err = false;
+    return new;
+  }
+
 char *version = "Tue May 31 13:33:54 EDT 2016";
 
 /* Many of the constants below should really be set by command line args.  */
 
-/* G: Mamimum relevance grade. Must be positive. */
+/* G: Maximum relevance grade. Must be positive. */
 #define G 2
 /* rp: global array of relevance probabilities, indexed by relevance grade. */
 double rp[G + 1];
@@ -754,12 +786,13 @@ rbpHalf (struct result *r, int size, int sizex, double *predetermined)
       {
         if (r[i].rankx == -1)
           max += pow(PSI,r[i].rank - 1);
-        else if (r[i].rank < r[i].rankx)
-          if (r[i].rankx < sizex)
-            max += (pow(PSI,r[i].rank - 1) - pow(PSI, r[i].rankx - 1));
-          else
-            max += pow(PSI,r[i].rank - 1);
-
+        else if (r[i].rank < r[i].rankx) 
+          {
+            if (r[i].rankx < sizex)
+              max += (pow(PSI,r[i].rank - 1) - pow(PSI, r[i].rankx - 1));
+            else
+              max += pow(PSI,r[i].rank - 1);
+          }
       }
     else if (r[i].rel > 0)
       pre += pow(PSI,r[i].rank - 1);
@@ -813,11 +846,12 @@ ndcgHalf (struct result *r, int size, int sizex, double *predetermined)
         {
           if (r[i].rankx == -1)
             max += rp[G]*discount;
-          else if (r[i].rank < r[i].rankx)
+          else if (r[i].rank < r[i].rankx) {
             if (r[i].rankx < sizex)
               max += rp[G]*(discount - 1.0/log2((double) r[i].rankx + 1));
             else
               max += rp[G]*discount;
+          }
         }
       else if (r[i].rel > 0)
         pre += rp[r[i].rel]*discount;
@@ -844,9 +878,9 @@ ndcgMaximize (struct result *r1, int size1, struct result *r2, int size2)
 }
 
 static void
-med (char *run1, char *run2, char *qrels)
+med (char *run1, char *run2, char *qrels, config_t *conf)
 {
-  int i, j, n = 0;
+  int cnt, i, j, n = 0;
   int topic1, topic2, size1, size2;
   struct result *r1, *r2;
   char *runid1, *runid2;
@@ -854,7 +888,14 @@ med (char *run1, char *run2, char *qrels)
   double rbp_max = 0.0, rbp_tot = 0.0;
   double ndcg_max = 0.0, ndcg_tot = 0.0;
 
-  printf ("run1,run2,topic,MED-nDCG@%d,MED-RBP,MED-ERR\n", NDCG_DEPTH);
+  printf ("run1,run2,topic");
+  if(conf->ndcg)
+    printf(",MED-nDCG@%d", NDCG_DEPTH);
+  if(conf->rbp)
+    printf(",MED-RBP");  
+  if(conf->err)
+    printf(",MED-ERR");
+  printf("\n");
 
   r1 = loadRun (run1, &size1);
   runid1 = r1[0].runid;
@@ -863,7 +904,10 @@ med (char *run1, char *run2, char *qrels)
 
   if (size1 <= 0 || size2 <= 0)
     {
-      printf ("%s,%s,0.0,0.0,0.0\n", runid1, runid2);
+      printf ("%s,%s", runid1, runid2);
+      for (cnt = 0; cnt < conf->count; ++cnt)
+        printf(",0.0");
+      printf("\n");
       return;
     }
 
@@ -899,16 +943,26 @@ med (char *run1, char *run2, char *qrels)
         }
       else
         {
-          ndcg_max = ndcgMaximize (r1, i, r2, j);
-          ndcg_tot += ndcg_max;
-          rbp_max = rbpMaximize (r1, i, r2, j);
-          rbp_tot += rbp_max;
-          err_max = errMaximize (r1, i, r2, j);
-          err_tot += err_max;
-          printf (
-            "%s,%s,%d,%.5f,%.5f,%.5f\n",
-            runid1, runid2, topic1, ndcg_max, rbp_max, err_max
-          );
+          printf("%s,%s,%d", runid1, runid2, topic1);
+          if (conf->ndcg)
+            {
+              ndcg_max = ndcgMaximize (r1, i, r2, j);
+              ndcg_tot += ndcg_max;
+              printf(",%.5f", ndcg_max);
+            }
+          if (conf->rbp) 
+            {
+              rbp_max = rbpMaximize (r1, i, r2, j);
+              rbp_tot += rbp_max;
+              printf(",%.5f", rbp_max);
+            }
+          if (conf->err)
+            {
+              err_max = errMaximize (r1, i, r2, j);
+              err_tot += err_max;
+              printf(",%.5f", err_max);
+            }
+          printf ("\n");
           n++;
           r1 += i;
           size1 -= i;
@@ -918,12 +972,29 @@ med (char *run1, char *run2, char *qrels)
     }
 
     if (n > 0)
-      printf (
-        "%s,%s,amean,%.5f,%.5f,%.5f\n",
-        runid1, runid2, ndcg_tot/n, rbp_tot/n, err_tot/n
-      );
+      {
+        printf("%s,%s,amean", runid1, runid2);
+          if (conf->ndcg)
+            {
+              printf(",%.5f", ndcg_tot/n);
+            }
+          if (conf->rbp) 
+            {
+              printf(",%.5f", rbp_tot/n);
+            }
+          if (conf->err)
+            {
+              printf(",%.5f", err_tot/n);
+            }
+          printf ("\n");
+      }
     else
-      printf ("%s,%s,amean,0.00000,0.00000,0.00000\n", runid1, runid2);
+      {
+        printf("%s,%s,amean");
+        for (cnt = 0; cnt < conf->count; ++cnt)
+          printf(",0.0");
+        printf ("\n");
+      }
 }
 
 static void
@@ -945,28 +1016,65 @@ computeRelevanceProbabilities ()
 static void
 usage ()
 {
-  error ("Usage: %s run1 run2 [qrels]\n", getProgramName());
+  error ("Usage: %s -a run1 -b run2 -q [qrels] [-r (rbp)] [-n (ndcg)] [-e (err)]\n", getProgramName());
 }
+
+
+const args_t 
+parse_args (int argc, char **argv)
+{
+  args_t args = new_args();
+  
+  int c;
+
+  setProgramName (argv[0]);
+
+  while ((c = getopt(argc, argv, "a:b:q:rne")) != -1) 
+    switch (c)
+      { 
+      case 'a':
+        args.run1 = optarg;
+        break;
+      case 'b':
+        args.run2 = optarg;
+        break;
+      case 'q':
+        args.qrels = optarg;
+        break;
+      case 'r':
+        args.conf.rbp = true;
+        args.conf.count += 1;
+        break;
+      case 'n':
+        args.conf.ndcg = true;
+        args.conf.count += 1;
+        break;
+      case 'e':
+        args.conf.err = true;
+        args.conf.count += 1;
+        break;
+      case '?':
+      default:
+        fprintf(stderr, "Error: Incorrect arguments provided.\n");
+        usage();
+      }
+  if (args.conf.count == 0)
+    {
+      fprintf(stderr, "Error: Must specify at least one metric.\n");
+      usage();
+    }
+  return args;
+}
+
 
 int
 main (int argc, char **argv)
 {
   char *run1, *run2, *qrels = (char *) 0;
-
-  setProgramName (argv[0]);
-
-  if (argc == 3 || argc == 4)
-    {
-      run1 = argv[1];
-      run2 = argv[2];
-      if (argc == 4)
-        qrels= argv[3];
-    }
-  else
-    usage ();
-
-  computeRelevanceProbabilities ();
-  med (run1, run2, qrels);
+  
+  args_t args = parse_args(argc, argv);
+  computeRelevanceProbabilities();
+  med (args.run1, args.run2, args.qrels, &args.conf);
 
   return 0;
 }
