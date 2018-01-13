@@ -1,0 +1,8 @@
+#!/usr/bin/perl -w
+use strict;
+
+my $run2 = pop @ARGV;
+my $run1 = pop @ARGV;
+
+my $MED = $0; $MED =~ s/_wrap//;
+exec($MED, "-a", $run1, "-b", $run2, @ARGV);
