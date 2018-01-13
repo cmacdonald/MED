@@ -58,6 +58,7 @@ args_t new_args()
     return new;
   }
 
+bool debug = false;
 char *version = "Tue May 31 13:33:54 EDT 2016";
 
 /* Many of the constants below should really be set by command line args.  */
@@ -565,7 +566,7 @@ loadQ (char *qrels, int *size)
   if ((fp = fopen (qrels, "r")) == NULL)
     error ("cannot open qrels file \"%s\"\n", qrels);
 
-  while ((line = getLine (fp)))
+  NEXTLINE: while ((line = getLine (fp)))
     {
       char *a[4];
       int topic, rel;
@@ -573,9 +574,15 @@ loadQ (char *qrels, int *size)
       if (
         split (line, a, 4) != 4
         || (topic = naturalNumber (a[0])) < 0
-        || (rel = naturalNumber (a[3])) < 0
+        /*|| (rel = naturalNumber (a[3])) < 0*/
       )
         error ("syntax error in qrel file \"%s\" at line %d\n", qrels, i + 1);
+      if ((rel = naturalNumber (a[3])) < 0)
+        {
+           //warn("Ignoring negative rel judgment at qrel line %d\n", i+1);
+           n--;
+           goto NEXTLINE;
+        }
       else
         {
           q[i].docno = localStrdup (a[2]);
@@ -586,17 +593,19 @@ loadQ (char *qrels, int *size)
           i++;
         }
     }
-
+  if (debug) warn("finished parsing qrels, %d lines\n", i);
 
   /* for each topic, verify that docnos have not been duplicated */
   sortQ (q, n);
+  if (debug) warn("sorted\n");
   for (i = 1; i < n; i++)
     if (q[i].topic == q[i-1].topic && strcmp(q[i].docno,q[i-1].docno) == 0)
       error (
         "duplicate docno (%s) for topic %d in qrels file \"%s\"\n",
         q[i].docno, q[i].topic, qrels
       );
-
+  if (debug)
+    warn("n is %d\n", n);
   *size = n;
   return q;
 }
@@ -836,7 +845,7 @@ ndcgHalf (struct result *r, int size, int sizex, double *predetermined)
 {
   int i;
   double pre = 0.0, max = 0.0;
-  double norm = 0.0;
+  //double norm = 0.0;
 
   for (i = 0; i < size; i++)
     {
@@ -901,6 +910,8 @@ med (char *run1, char *run2, char *qrels, config_t *conf)
   runid1 = r1[0].runid;
   r2 = loadRun (run2, &size2);
   runid2 = r2[0].runid;
+  if (debug)
+    warn("size1=%d, size2=%d\n", size1, size2); 
 
   if (size1 <= 0 || size2 <= 0)
     {
@@ -908,15 +919,17 @@ med (char *run1, char *run2, char *qrels, config_t *conf)
       for (cnt = 0; cnt < conf->count; ++cnt)
         printf(",0.0");
       printf("\n");
+      if (debug) warn("going to return");
       return;
     }
-
+  if (debug) warn("check qrels %d\n", qrels);
   if (qrels)
     {
       struct qrel *q;
       int sizeQ;
-
+      if (debug) warn("loadQ calling\n");
       q = loadQ (qrels, &sizeQ);
+      if (debug) warn("loadQ complete\n");
       labelQ (r1, size1, q, sizeQ);
       labelQ (r2, size2, q, sizeQ);
     }
@@ -990,7 +1003,7 @@ med (char *run1, char *run2, char *qrels, config_t *conf)
       }
     else
       {
-        printf("%s,%s,amean");
+        printf("%s,%s,amean", runid1, runid2);
         for (cnt = 0; cnt < conf->count; ++cnt)
           printf(",0.0");
         printf ("\n");
@@ -1070,7 +1083,7 @@ parse_args (int argc, char **argv)
 int
 main (int argc, char **argv)
 {
-  char *run1, *run2, *qrels = (char *) 0;
+  //char *run1, *run2, *qrels = (char *) 0;
   
   args_t args = parse_args(argc, argv);
   computeRelevanceProbabilities();
